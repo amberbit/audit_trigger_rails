@@ -10,20 +10,6 @@ SET check_function_bodies = false;
 SET client_min_messages = warning;
 
 --
--- Name: audit; Type: SCHEMA; Schema: -; Owner: -
---
-
-CREATE SCHEMA audit;
-
-
---
--- Name: SCHEMA audit; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON SCHEMA audit IS 'Out-of-table audit/history logging tables and trigger functions';
-
-
---
 -- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -51,21 +37,21 @@ CREATE EXTENSION IF NOT EXISTS hstore WITH SCHEMA public;
 COMMENT ON EXTENSION hstore IS 'data type for storing sets of (key, value) pairs';
 
 
-SET search_path = audit, pg_catalog;
+SET search_path = public, pg_catalog;
 
 --
--- Name: audit_table(regclass); Type: FUNCTION; Schema: audit; Owner: -
+-- Name: audit_table(regclass); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION audit_table(target_table regclass) RETURNS void
     LANGUAGE sql
     AS $_$
-SELECT audit.audit_table($1, BOOLEAN 't', BOOLEAN 't');
+SELECT audit_table($1, BOOLEAN 't', BOOLEAN 't');
 $_$;
 
 
 --
--- Name: FUNCTION audit_table(target_table regclass); Type: COMMENT; Schema: audit; Owner: -
+-- Name: FUNCTION audit_table(target_table regclass); Type: COMMENT; Schema: public; Owner: -
 --
 
 COMMENT ON FUNCTION audit_table(target_table regclass) IS '
@@ -74,18 +60,18 @@ Add auditing support to the given table. Row-level changes will be logged with f
 
 
 --
--- Name: audit_table(regclass, boolean, boolean); Type: FUNCTION; Schema: audit; Owner: -
+-- Name: audit_table(regclass, boolean, boolean); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean) RETURNS void
     LANGUAGE sql
     AS $_$
-SELECT audit.audit_table($1, $2, $3, ARRAY[]::text[]);
+SELECT audit_table($1, $2, $3, ARRAY[]::text[]);
 $_$;
 
 
 --
--- Name: audit_table(regclass, boolean, boolean, text[]); Type: FUNCTION; Schema: audit; Owner: -
+-- Name: audit_table(regclass, boolean, boolean, text[]); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]) RETURNS void
@@ -105,7 +91,7 @@ BEGIN
         END IF;
         _q_txt = 'CREATE TRIGGER audit_trigger_row AFTER INSERT OR UPDATE OR DELETE ON ' || 
                  target_table || 
-                 ' FOR EACH ROW EXECUTE PROCEDURE audit.if_modified_func(' ||
+                 ' FOR EACH ROW EXECUTE PROCEDURE if_modified_func(' ||
                  quote_literal(audit_query_text) || _ignored_cols_snip || ');';
         RAISE NOTICE '%',_q_txt;
         EXECUTE _q_txt;
@@ -115,7 +101,7 @@ BEGIN
 
     _q_txt = 'CREATE TRIGGER audit_trigger_stm AFTER ' || stm_targets || ' ON ' ||
              target_table ||
-             ' FOR EACH STATEMENT EXECUTE PROCEDURE audit.if_modified_func('||
+             ' FOR EACH STATEMENT EXECUTE PROCEDURE if_modified_func('||
              quote_literal(audit_query_text) || ');';
     RAISE NOTICE '%',_q_txt;
     EXECUTE _q_txt;
@@ -125,7 +111,7 @@ $$;
 
 
 --
--- Name: FUNCTION audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]); Type: COMMENT; Schema: audit; Owner: -
+-- Name: FUNCTION audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]); Type: COMMENT; Schema: public; Owner: -
 --
 
 COMMENT ON FUNCTION audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]) IS '
@@ -140,7 +126,7 @@ Arguments:
 
 
 --
--- Name: if_modified_func(); Type: FUNCTION; Schema: audit; Owner: -
+-- Name: if_modified_func(); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION if_modified_func() RETURNS trigger
@@ -148,7 +134,7 @@ CREATE FUNCTION if_modified_func() RETURNS trigger
     SET search_path TO pg_catalog, public
     AS $$
 DECLARE
-    audit_row audit.logged_actions;
+    audit_row logged_actions;
     include_values boolean;
     log_diffs boolean;
     h_old hstore;
@@ -156,24 +142,15 @@ DECLARE
     excluded_cols text[] = ARRAY[]::text[];
 BEGIN
     IF TG_WHEN <> 'AFTER' THEN
-        RAISE EXCEPTION 'audit.if_modified_func() may only run as an AFTER trigger';
+        RAISE EXCEPTION 'if_modified_func() may only run as an AFTER trigger';
     END IF;
 
     audit_row = ROW(
-        nextval('audit.logged_actions_event_id_seq'), -- event_id
-        TG_TABLE_SCHEMA::text,                        -- schema_name
+        nextval('logged_actions_id_seq'), -- id
         TG_TABLE_NAME::text,                          -- table_name
-        TG_RELID,                                     -- relation OID for much quicker searches
-        session_user::text,                           -- session_user_name
-        current_timestamp,                            -- action_tstamp_tx
-        statement_timestamp(),                        -- action_tstamp_stm
-        clock_timestamp(),                            -- action_tstamp_clk
-        txid_current(),                               -- transaction ID
-        current_setting('application_name'),          -- client application
-        inet_client_addr(),                           -- client_addr
-        inet_client_port(),                           -- client_port
-        current_query(),                              -- top-level query or queries (if multistatement) from client
+        current_timestamp,                            -- created_at
         substring(TG_OP,1,1),                         -- action
+        current_query(),                              -- top-level query or queries (if multistatement) from client
         NULL, NULL,                                   -- row_data, changed_fields
         'f'                                           -- statement_only
         );
@@ -185,7 +162,7 @@ BEGIN
     IF TG_ARGV[1] IS NOT NULL THEN
         excluded_cols = TG_ARGV[1]::text[];
     END IF;
-    
+
     IF (TG_OP = 'UPDATE' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(OLD.*);
         audit_row.changed_fields =  (hstore(NEW.*) - audit_row.row_data) - excluded_cols;
@@ -200,17 +177,17 @@ BEGIN
     ELSIF (TG_LEVEL = 'STATEMENT' AND TG_OP IN ('INSERT','UPDATE','DELETE','TRUNCATE')) THEN
         audit_row.statement_only = 't';
     ELSE
-        RAISE EXCEPTION '[audit.if_modified_func] - Trigger func added as trigger for unhandled case: %, %',TG_OP, TG_LEVEL;
+        RAISE EXCEPTION '[if_modified_func] - Trigger func added as trigger for unhandled case: %, %',TG_OP, TG_LEVEL;
         RETURN NULL;
     END IF;
-    INSERT INTO audit.logged_actions VALUES (audit_row.*);
+    INSERT INTO logged_actions VALUES (audit_row.*);
     RETURN NULL;
 END;
 $$;
 
 
 --
--- Name: FUNCTION if_modified_func(); Type: COMMENT; Schema: audit; Owner: -
+-- Name: FUNCTION if_modified_func(); Type: COMMENT; Schema: public; Owner: -
 --
 
 COMMENT ON FUNCTION if_modified_func() IS '
@@ -250,162 +227,27 @@ SET default_tablespace = '';
 SET default_with_oids = false;
 
 --
--- Name: logged_actions; Type: TABLE; Schema: audit; Owner: -; Tablespace: 
+-- Name: logged_actions; Type: TABLE; Schema: public; Owner: -; Tablespace: 
 --
 
 CREATE TABLE logged_actions (
-    event_id bigint NOT NULL,
-    schema_name text NOT NULL,
+    id bigint NOT NULL,
     table_name text NOT NULL,
-    relid oid NOT NULL,
-    session_user_name text,
-    action_tstamp_tx timestamp with time zone NOT NULL,
-    action_tstamp_stm timestamp with time zone NOT NULL,
-    action_tstamp_clk timestamp with time zone NOT NULL,
-    transaction_id bigint,
-    application_name text,
-    client_addr inet,
-    client_port integer,
-    client_query text,
+    created_at timestamp with time zone NOT NULL,
     action text NOT NULL,
-    row_data public.hstore,
-    changed_fields public.hstore,
+    client_query text,
+    row_data hstore,
+    changed_fields hstore,
     statement_only boolean NOT NULL,
     CONSTRAINT logged_actions_action_check CHECK ((action = ANY (ARRAY['I'::text, 'D'::text, 'U'::text, 'T'::text])))
 );
 
 
 --
--- Name: TABLE logged_actions; Type: COMMENT; Schema: audit; Owner: -
+-- Name: logged_actions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE logged_actions IS 'History of auditable actions on audited tables, from audit.if_modified_func()';
-
-
---
--- Name: COLUMN logged_actions.event_id; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.event_id IS 'Unique identifier for each auditable event';
-
-
---
--- Name: COLUMN logged_actions.schema_name; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.schema_name IS 'Database schema audited table for this event is in';
-
-
---
--- Name: COLUMN logged_actions.table_name; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.table_name IS 'Non-schema-qualified table name of table event occured in';
-
-
---
--- Name: COLUMN logged_actions.relid; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.relid IS 'Table OID. Changes with drop/create. Get with ''tablename''::regclass';
-
-
---
--- Name: COLUMN logged_actions.session_user_name; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.session_user_name IS 'Login / session user whose statement caused the audited event';
-
-
---
--- Name: COLUMN logged_actions.action_tstamp_tx; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.action_tstamp_tx IS 'Transaction start timestamp for tx in which audited event occurred';
-
-
---
--- Name: COLUMN logged_actions.action_tstamp_stm; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.action_tstamp_stm IS 'Statement start timestamp for tx in which audited event occurred';
-
-
---
--- Name: COLUMN logged_actions.action_tstamp_clk; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.action_tstamp_clk IS 'Wall clock time at which audited event''s trigger call occurred';
-
-
---
--- Name: COLUMN logged_actions.transaction_id; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.transaction_id IS 'Identifier of transaction that made the change. May wrap, but unique paired with action_tstamp_tx.';
-
-
---
--- Name: COLUMN logged_actions.application_name; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.application_name IS 'Application name set when this audit event occurred. Can be changed in-session by client.';
-
-
---
--- Name: COLUMN logged_actions.client_addr; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.client_addr IS 'IP address of client that issued query. Null for unix domain socket.';
-
-
---
--- Name: COLUMN logged_actions.client_port; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.client_port IS 'Remote peer IP port address of client that issued query. Undefined for unix socket.';
-
-
---
--- Name: COLUMN logged_actions.client_query; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.client_query IS 'Top-level query that caused this auditable event. May be more than one statement.';
-
-
---
--- Name: COLUMN logged_actions.action; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.action IS 'Action type; I = insert, D = delete, U = update, T = truncate';
-
-
---
--- Name: COLUMN logged_actions.row_data; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.row_data IS 'Record value. Null for statement-level trigger. For INSERT this is the new tuple. For DELETE and UPDATE it is the old tuple.';
-
-
---
--- Name: COLUMN logged_actions.changed_fields; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.changed_fields IS 'New values of fields changed by UPDATE. Null except for row-level UPDATE events.';
-
-
---
--- Name: COLUMN logged_actions.statement_only; Type: COMMENT; Schema: audit; Owner: -
---
-
-COMMENT ON COLUMN logged_actions.statement_only IS '''t'' if audit event is from an FOR EACH STATEMENT trigger, ''f'' for FOR EACH ROW';
-
-
---
--- Name: logged_actions_event_id_seq; Type: SEQUENCE; Schema: audit; Owner: -
---
-
-CREATE SEQUENCE logged_actions_event_id_seq
+CREATE SEQUENCE logged_actions_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -414,13 +256,43 @@ CREATE SEQUENCE logged_actions_event_id_seq
 
 
 --
--- Name: logged_actions_event_id_seq; Type: SEQUENCE OWNED BY; Schema: audit; Owner: -
+-- Name: logged_actions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE logged_actions_event_id_seq OWNED BY logged_actions.event_id;
+ALTER SEQUENCE logged_actions_id_seq OWNED BY logged_actions.id;
 
 
-SET search_path = public, pg_catalog;
+--
+-- Name: posts; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE posts (
+    id integer NOT NULL,
+    title character varying,
+    content text,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: posts_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE posts_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: posts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE posts_id_seq OWNED BY posts.id;
+
 
 --
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -; Tablespace: 
@@ -431,45 +303,49 @@ CREATE TABLE schema_migrations (
 );
 
 
-SET search_path = audit, pg_catalog;
-
 --
--- Name: event_id; Type: DEFAULT; Schema: audit; Owner: -
+-- Name: id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY logged_actions ALTER COLUMN event_id SET DEFAULT nextval('logged_actions_event_id_seq'::regclass);
+ALTER TABLE ONLY logged_actions ALTER COLUMN id SET DEFAULT nextval('logged_actions_id_seq'::regclass);
 
 
 --
--- Name: logged_actions_pkey; Type: CONSTRAINT; Schema: audit; Owner: -; Tablespace: 
+-- Name: id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY posts ALTER COLUMN id SET DEFAULT nextval('posts_id_seq'::regclass);
+
+
+--
+-- Name: logged_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
 --
 
 ALTER TABLE ONLY logged_actions
-    ADD CONSTRAINT logged_actions_pkey PRIMARY KEY (event_id);
+    ADD CONSTRAINT logged_actions_pkey PRIMARY KEY (id);
 
 
 --
--- Name: logged_actions_action_idx; Type: INDEX; Schema: audit; Owner: -; Tablespace: 
+-- Name: posts_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY posts
+    ADD CONSTRAINT posts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: logged_actions_action_created_at_idx; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX logged_actions_action_created_at_idx ON logged_actions USING btree (created_at);
+
+
+--
+-- Name: logged_actions_action_idx; Type: INDEX; Schema: public; Owner: -; Tablespace: 
 --
 
 CREATE INDEX logged_actions_action_idx ON logged_actions USING btree (action);
 
-
---
--- Name: logged_actions_action_tstamp_tx_stm_idx; Type: INDEX; Schema: audit; Owner: -; Tablespace: 
---
-
-CREATE INDEX logged_actions_action_tstamp_tx_stm_idx ON logged_actions USING btree (action_tstamp_stm);
-
-
---
--- Name: logged_actions_relid_idx; Type: INDEX; Schema: audit; Owner: -; Tablespace: 
---
-
-CREATE INDEX logged_actions_relid_idx ON logged_actions USING btree (relid);
-
-
-SET search_path = public, pg_catalog;
 
 --
 -- Name: unique_schema_migrations; Type: INDEX; Schema: public; Owner: -; Tablespace: 
@@ -485,4 +361,6 @@ CREATE UNIQUE INDEX unique_schema_migrations ON schema_migrations USING btree (v
 SET search_path TO "$user",public;
 
 INSERT INTO schema_migrations (version) VALUES ('20150213092514');
+
+INSERT INTO schema_migrations (version) VALUES ('20150213094507');
 
