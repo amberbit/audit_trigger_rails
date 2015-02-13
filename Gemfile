@@ -15,3 +15,6 @@ gemspec
 gem "minitest"
 gem "rspec-rails", "~> 2.12.2"
 gem "factory_girl_rails", "~> 4.0"
+gem "pry"
+gem "database_cleaner"
+
