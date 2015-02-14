@@ -1,4 +1,3 @@
 Rails.application.routes.draw do
-
-  mount AuditTriggerRails::Engine => "/audit_trigger_rails"
+  get "posts/create", to: "posts#create"
 end
