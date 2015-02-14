@@ -18,3 +18,4 @@ module AuditTriggerRails
     TemporaryAppData.create app_data: data
   end
 end
+
