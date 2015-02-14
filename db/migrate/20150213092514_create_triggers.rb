@@ -25,7 +25,8 @@ CREATE TABLE logged_actions (
     client_query text,
     row_data hstore,
     changed_fields hstore,
-    statement_only boolean not null
+    statement_only boolean not null,
+    app_data hstore
 );
 
 CREATE INDEX logged_actions_action_created_at_idx ON logged_actions(created_at);
