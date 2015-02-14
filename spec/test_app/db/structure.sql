@@ -105,7 +105,6 @@ BEGIN
              quote_literal(audit_query_text) || ');';
     RAISE NOTICE '%',_q_txt;
     EXECUTE _q_txt;
-
 END;
 $$;
 
@@ -140,7 +139,14 @@ DECLARE
     h_old hstore;
     h_new hstore;
     excluded_cols text[] = ARRAY[]::text[];
+    app_data hstore;
 BEGIN
+
+    IF EXISTS (SELECT relname FROM pg_class WHERE relname='temporary_app_data')
+    THEN
+      app_data = (SELECT temporary_app_data.app_data from temporary_app_data limit 1);
+    END IF;
+
     IF TG_WHEN <> 'AFTER' THEN
         RAISE EXCEPTION 'if_modified_func() may only run as an AFTER trigger';
     END IF;
@@ -152,7 +158,8 @@ BEGIN
         substring(TG_OP,1,1),                         -- action
         current_query(),                              -- top-level query or queries (if multistatement) from client
         NULL, NULL,                                   -- row_data, changed_fields
-        'f'                                           -- statement_only
+        'f',                                          -- statement_only
+        app_data
         );
 
     IF NOT TG_ARGV[0]::boolean IS DISTINCT FROM 'f'::boolean THEN
@@ -239,6 +246,7 @@ CREATE TABLE logged_actions (
     row_data hstore,
     changed_fields hstore,
     statement_only boolean NOT NULL,
+    app_data hstore,
     CONSTRAINT logged_actions_action_check CHECK ((action = ANY (ARRAY['I'::text, 'D'::text, 'U'::text, 'T'::text])))
 );
 
@@ -398,20 +406,6 @@ CREATE INDEX logged_actions_action_idx ON logged_actions USING btree (action);
 --
 
 CREATE UNIQUE INDEX unique_schema_migrations ON schema_migrations USING btree (version);
-
-
---
--- Name: audit_trigger_row; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER audit_trigger_row AFTER INSERT OR DELETE OR UPDATE ON posts FOR EACH ROW EXECUTE PROCEDURE if_modified_func('true');
-
-
---
--- Name: audit_trigger_stm; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER audit_trigger_stm AFTER TRUNCATE ON posts FOR EACH STATEMENT EXECUTE PROCEDURE if_modified_func('true');
 
 
 --

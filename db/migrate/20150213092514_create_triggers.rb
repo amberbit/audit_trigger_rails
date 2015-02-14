@@ -40,7 +40,14 @@ DECLARE
     h_old hstore;
     h_new hstore;
     excluded_cols text[] = ARRAY[]::text[];
+    app_data hstore;
 BEGIN
+
+    IF EXISTS (SELECT relname FROM pg_class WHERE relname='temporary_app_data')
+    THEN
+      app_data = (SELECT temporary_app_data.app_data from temporary_app_data limit 1);
+    END IF;
+
     IF TG_WHEN <> 'AFTER' THEN
         RAISE EXCEPTION 'if_modified_func() may only run as an AFTER trigger';
     END IF;
@@ -52,7 +59,8 @@ BEGIN
         substring(TG_OP,1,1),                         -- action
         current_query(),                              -- top-level query or queries (if multistatement) from client
         NULL, NULL,                                   -- row_data, changed_fields
-        'f'                                           -- statement_only
+        'f',                                          -- statement_only
+        app_data
         );
 
     IF NOT TG_ARGV[0]::boolean IS DISTINCT FROM 'f'::boolean THEN
@@ -151,7 +159,6 @@ BEGIN
              quote_literal(audit_query_text) || ');';
     RAISE NOTICE '%',_q_txt;
     EXECUTE _q_txt;
-
 END;
 $body$
 language 'plpgsql';
