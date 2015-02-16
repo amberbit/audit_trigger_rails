@@ -12,6 +12,13 @@ describe "App data" do
     expect(app_data["current_user_name"]).to eql("Jack Black")
   end
 
+  it 'should be possible to fetch app_data that was set' do
+    AuditTriggerRails.app_data = { edit_id: "1", current_user_id: "2", current_user_name: "Jack Black" }
+
+    expect(AuditTriggerRails.app_data).to eql({ "edit_id" => "1", "current_user_id" => "2", "current_user_name" => "Jack Black" })
+  end
+
+
   it 'should be possible to re-set app data' do
     AuditTriggerRails.app_data = nil
 
@@ -19,6 +26,8 @@ describe "App data" do
 
     app_data = LoggedAction.first.app_data
     expect(app_data).to be_nil
+
+    expect(AuditTriggerRails.app_data).to be_nil
   end
 end
 
