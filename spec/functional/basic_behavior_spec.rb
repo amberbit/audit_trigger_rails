@@ -19,13 +19,33 @@ describe "Basic behavior" do
 
       expect(LoggedAction.count).to eq(2)
 
-      row_data = LoggedAction.order("created_at desc").first.row_data
-      expect(row_data["id"]).to eql(Post.first.id.to_s)
-      expect(row_data["title"]).to eql("Foo")
+      log = LoggedAction.first
+      expect(log.row_data["id"]).to eql(Post.first.id.to_s)
+      expect(log.row_data["title"]).to eql("Foo")
 
-      log = LoggedAction.order("created_at desc").last
+      log = LoggedAction.last
       expect(log.row_data["title"]).to eql("Foo")
       expect(log.changed_fields["title"]).to eql("FooBar")
+    end
+
+    it 'should save the updated row data' do
+      p = Post.create! title: "Foo", content: "Bar"
+      p.update_attributes :title => "FooBar"
+
+      log = LoggedAction.last
+      expect(log.updated_row_data["id"]).to eql(Post.first.id.to_s)
+      expect(log.updated_row_data["title"]).to eql("FooBar")
+    end
+
+    it 'should save the record_id' do
+      p = Post.create! title: "Foo", content: "Bar"
+      p.update_attributes :title => "FooBar"
+
+      log = LoggedAction.all.first
+      expect(log.record_id).to eql(p.id.to_i)
+
+      log = LoggedAction.all.last
+      expect(log.record_id).to eql(p.id.to_i)
     end
   end
 

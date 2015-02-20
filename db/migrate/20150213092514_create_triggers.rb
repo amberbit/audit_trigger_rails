@@ -20,17 +20,16 @@ CREATE EXTENSION IF NOT EXISTS hstore;
 CREATE TABLE logged_actions (
     id bigserial primary key,
     table_name text not null,
+    record_id bigint,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     action TEXT NOT NULL CHECK (action IN ('I','D','U', 'T')),
     client_query text,
     row_data hstore,
+    updated_row_data hstore,
     changed_fields hstore,
     statement_only boolean not null,
     app_data hstore
 );
-
-CREATE INDEX logged_actions_action_created_at_idx ON logged_actions(created_at);
-CREATE INDEX logged_actions_action_idx ON logged_actions(action);
 
 CREATE OR REPLACE FUNCTION if_modified_func() RETURNS TRIGGER AS $body$
 DECLARE
@@ -53,12 +52,13 @@ BEGIN
     END IF;
 
     audit_row = ROW(
-        nextval('logged_actions_id_seq'), -- id
+        nextval('logged_actions_id_seq'),             -- id
         TG_TABLE_NAME::text,                          -- table_name
+        NULL,                                         -- record_id
         current_timestamp,                            -- created_at
         substring(TG_OP,1,1),                         -- action
         current_query(),                              -- top-level query or queries (if multistatement) from client
-        NULL, NULL,                                   -- row_data, changed_fields
+        NULL, NULL, NULL,                             -- row_data, updated_row_data, changed_fields
         'f',                                          -- statement_only
         app_data
         );
@@ -73,15 +73,21 @@ BEGIN
 
     IF (TG_OP = 'UPDATE' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(OLD.*);
+        audit_row.updated_row_data = hstore(NEW.*);
         audit_row.changed_fields =  (hstore(NEW.*) - audit_row.row_data) - excluded_cols;
+        audit_row.record_id = audit_row.row_data->'id';
         IF audit_row.changed_fields = hstore('') THEN
             -- All changed fields are ignored. Skip this update.
             RETURN NULL;
         END IF;
     ELSIF (TG_OP = 'DELETE' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(OLD.*) - excluded_cols;
+        audit_row.updated_row_data = hstore(OLD.*) - excluded_cols;
+        audit_row.record_id = audit_row.row_data->'id';
     ELSIF (TG_OP = 'INSERT' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(NEW.*) - excluded_cols;
+        audit_row.updated_row_data = hstore(NEW.*) - excluded_cols;
+        audit_row.record_id = audit_row.row_data->'id';
     ELSIF (TG_LEVEL = 'STATEMENT' AND TG_OP IN ('INSERT','UPDATE','DELETE','TRUNCATE')) THEN
         audit_row.statement_only = 't';
     ELSE
