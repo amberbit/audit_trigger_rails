@@ -28,7 +28,7 @@ CREATE TABLE logged_actions (
     updated_row_data hstore,
     changed_fields hstore,
     statement_only boolean not null,
-    app_data hstore
+    app_data jsonb
 );
 
 CREATE OR REPLACE FUNCTION if_modified_func() RETURNS TRIGGER AS $body$
@@ -39,7 +39,7 @@ DECLARE
     h_old hstore;
     h_new hstore;
     excluded_cols text[] = ARRAY[]::text[];
-    app_data hstore;
+    app_data jsonb;
 BEGIN
 
     IF EXISTS (SELECT relname FROM pg_class WHERE relname='temporary_app_data')

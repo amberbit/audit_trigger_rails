@@ -139,7 +139,7 @@ DECLARE
     h_old hstore;
     h_new hstore;
     excluded_cols text[] = ARRAY[]::text[];
-    app_data hstore;
+    app_data jsonb;
 BEGIN
 
     IF EXISTS (SELECT relname FROM pg_class WHERE relname='temporary_app_data')
@@ -255,7 +255,7 @@ CREATE TABLE logged_actions (
     updated_row_data hstore,
     changed_fields hstore,
     statement_only boolean NOT NULL,
-    app_data hstore,
+    app_data jsonb,
     CONSTRAINT logged_actions_action_check CHECK ((action = ANY (ARRAY['I'::text, 'D'::text, 'U'::text, 'T'::text])))
 );
 

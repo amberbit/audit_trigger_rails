@@ -17,7 +17,7 @@ module AuditTriggerRails
   end
 
   def self.app_data
-    ActiveRecord::Base.connection.execute "CREATE TABLE IF NOT EXISTS temporary_app_data (id serial PRIMARY KEY, app_data hstore)"
+    ActiveRecord::Base.connection.execute "CREATE TABLE IF NOT EXISTS temporary_app_data (id serial PRIMARY KEY, app_data jsonb)"
 
     TemporaryAppData.first.try(:app_data)
   end
@@ -25,7 +25,7 @@ module AuditTriggerRails
   def self.clear_app_data
     ActiveRecord::Base.connection.execute "DROP TABLE IF EXISTS temporary_app_data;"
 
-    ActiveRecord::Base.connection.execute "CREATE TABLE temporary_app_data (id serial PRIMARY KEY, app_data hstore)"
+    ActiveRecord::Base.connection.execute "CREATE TABLE temporary_app_data (id serial PRIMARY KEY, app_data jsonb)"
   end
 end
 
