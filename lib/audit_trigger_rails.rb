@@ -1,5 +1,4 @@
 require "audit_trigger_rails/engine"
-require "temping"
 
 module AuditTriggerRails
   def self.audited_tables=(table_names)
